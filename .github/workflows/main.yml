@@ -3,55 +3,67 @@ name: Build IQ4YOU Renewals APK
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
-
-permissions:
-  contents: read
+    branches: [ main ]
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.3.1"
+          gradle-version: '9.3.1'
 
-      - name: Find and extract Supabase project
+      - name: Find and extract project ZIP
+        shell: bash
         run: |
-          ZIP=$(find . -maxdepth 1 -type f -iname "*supabase-ready*.zip" | head -n 1)
+          set -euo pipefail
 
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: Supabase-ready ZIP was not found."
-            echo "Please upload iq4you-renewals-supabase-ready.zip to the repository."
+          ZIP=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)
+
+          if [ -z "${ZIP:-}" ]; then
+            echo "ERROR: No project ZIP was found."
             exit 1
           fi
 
-          echo "Using: $ZIP"
-          mkdir build-src
-          unzip -q "$ZIP" -d build-src
+          echo "Using project ZIP: $ZIP"
 
-      - name: Build APK
-        working-directory: build-src
-        run: gradle --no-daemon :app:assembleDebug
+          rm -rf project-src
+          mkdir project-src
+
+          unzip -q "$ZIP" -d project-src
+
+          ROOT=$(find project-src -type f -name 'settings.gradle.kts' -print -quit | xargs -r dirname)
+
+          if [ -z "${ROOT:-}" ]; then
+            echo "ERROR: Could not find Android project inside ZIP."
+            exit 1
+          fi
+
+          echo "Project root: $ROOT"
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: IQ4YOU-Renewals-Supabase-APK
-          path: build-src/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          name: IQ4YOU-Renewals-debug
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/*.apk
